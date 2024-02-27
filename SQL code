@@ -1,0 +1,170 @@
+select distinct market from dim_customer
+where customer="Atliq Exclusive" and region="APAC";
+
+with CTE_20 AS(
+select
+ count(distinct(p.product_code)) as unique_products_2020 from dim_product p
+cross join fact_sales_monthly s on 
+p.product_code=s.product_code
+where s.fiscal_year=2020),
+CTE_21 AS(select
+ count(distinct(p.product_code)) as unique_products_2021 from dim_product p
+cross join fact_sales_monthly s on 
+p.product_code=s.product_code
+where s.fiscal_year=2021)
+select unique_products_2020, unique_products_2021, 
+round((unique_products_2021-unique_products_2020)*100/(unique_products_2020),2) as Percentage_inc
+from CTE_20
+JOIN CTE_21 ON 1=1;
+
+select segment,
+ count(distinct(product_code)) as unique_products from dim_product 
+ group by segment
+ order by unique_products desc;
+ 
+ with CTE_20 AS(select p.segment,
+ count(distinct(p.product_code)) as product_count_2020 from dim_product p
+cross join fact_sales_monthly s on 
+p.product_code=s.product_code
+where s.fiscal_year=2020
+group by p.segment
+order by p.segment desc
+ ),
+CTE_21 AS(select p.segment,
+ count(distinct(p.product_code)) as product_count_2021 from dim_product p 
+cross join fact_sales_monthly s on 
+p.product_code=s.product_code
+where s.fiscal_year=2021
+group by p.segment
+order by p.segment desc)
+select CTE_20.segment, product_count_2020, product_count_2021,
+(product_count_2021-product_count_2020) as Difference
+from CTE_20
+JOIN CTE_21 ON CTE_20.segment=CTE_21.segment
+order by Difference desc;
+
+
+
+select 
+       m.product_code, 
+       p.product, 
+       round(m.manufacturing_cost,2) as manufacturing_cost 
+from fact_manufacturing_cost m 
+join dim_product as p on m.product_code = p.product_code 
+where manufacturing_cost = (select min(manufacturing_cost) from fact_manufacturing_cost) or
+   manufacturing_cost = (select max(manufacturing_cost) from fact_manufacturing_cost);
+
+
+
+select  
+	   c.customer_code,
+       c.customer,
+	   concat(round(avg(pre.pre_invoice_discount_pct),4),"%") as Average_discount_percentage 
+from fact_pre_invoice_deductions pre
+join dim_customer c 
+on pre.customer_code=c.customer_code
+where pre.fiscal_year=2021 and c.market="India"
+group by c.customer_code,c.customer 
+order by Average_discount_percentage Desc
+limit 5;
+
+
+select monthname(s.date) as Month, year(s.date) as Year, 
+concat(round(sum(g.gross_price*s.sold_quantity)/1000000,2),'M') as Gross_sales_amount
+from  fact_sales_monthly s
+join dim_customer c
+join fact_gross_price g
+on s.product_code=g.product_code and 
+s.customer_code=c.customer_code
+where customer='Atliq Exclusive'
+group by Month, Year
+order by year;
+
+
+
+select
+       case when  date between '2019-09-01' and '2019-11-01' then 'Q1'
+            when  date between '2019-12-01' and '2020-02-01' then 'Q2'
+         when  date between '2020-03-01' and '2020-05-01' then 'Q3'
+         when  date between '2020-06-01' and '2020-08-01' then "Q4" end as Quarter,
+       sum(sold_quantity) as total_sold_quantity
+from fact_sales_monthly
+where fiscal_year = 2020
+group by Quarter
+order by total_sold_quantity desc;
+
+
+
+
+with CTE_1 as (select 
+sum((g.gross_price*s.sold_quantity)/1000000) as Gross_sales_Mln
+from  fact_sales_monthly s
+join dim_customer c
+join fact_gross_price g
+on s.product_code=g.product_code and 
+s.customer_code=c.customer_code
+where s.fiscal_year=2021
+group by c.channel),
+CTE_2 as (
+select CTE_1.Gross_sales_Mln as total)
+select 
+       CTE_1.channel, 
+       round(CTE_1.Gross_sales_Mln,2) as Gross_sales_AMOUNT_Mln, 
+       concat(round((CTE_1.Gross_sales_Mln/CTE_2.total)*100,2),'%') as percentage
+from CTE_1 
+cross join CTE_2
+order by percentage desc;
+
+
+
+
+
+
+
+with cte as 
+ (
+    select 
+            c.channel,
+            sum(p.gross_price*f.sold_quantity)/1000000 as gross_sales_mln  
+    from fact_sales_monthly f 
+    inner join fact_gross_price p on f.product_code=p.product_code
+    inner join dim_customer c on f.customer_code=c.customer_code 
+    where f.fiscal_year=2021
+    group by channel
+ ) , 
+cte2 as 
+ (
+    select sum(gross_sales_mln) as total 
+    from cte
+           
+ )
+select 
+       cte.channel, 
+       round(cte.gross_sales_mln,2) as gross_sales_mln, 
+       concat(round((cte.gross_sales_mln/cte2.total)*100,2),'%') as percentage
+from cte 
+cross join cte2
+order by percentage desc;
+
+
+
+
+with cte1 as (
+		select
+			p.division,
+			p.product_code,
+            p.product,
+			sum(s.sold_quantity) as total_sold_quantity 
+			from dim_product p
+			join fact_sales_monthly s
+			on p.product_code=s.product_code
+			where fiscal_year=2021
+			group by p.division,p.product,p.product_code
+			order by total_sold_quantity  desc
+		),
+		cte2 as (
+			select *,
+			rank() over(partition by division order by total_sold_quantity desc) as rank_order
+			from cte1
+		)
+	select * from cte2 where rank_order<=3
